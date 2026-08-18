@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VoiceScribe</string>
+
+    <string name="action_pick_audio">Выбрать аудио</string>
+    <string name="action_pick_audio_en">Pick audio</string>
+    <string name="action_cancel">Отменить</string>
+    <string name="action_start">Начать</string>
+    <string name="action_delete">Удалить</string>
+
+    <string name="state_submitted">В очереди</string>
+    <string name="state_decoding">Декодирование аудио…</string>
+    <string name="state_preprocessing">Предобработка…</string>
+    <string name="state_diarizing">Определение говорящих…</string>
+    <string name="state_transcribing">Распознавание речи…</string>
+    <string name="state_completed">Готово</string>
+    <string name="state_failed">Ошибка</string>
+    <string name="state_cancelled">Отменено</string>
+
+    <string name="model_download">Скачать модель</string>
+    <string name="model_downloading">Скачивание… %1$d%%</string>
+    <string name="model_active">Активна</string>
+    <string name="model_activate">Активировать</string>
+
+    <string name="notification_title">VoiceScribe</string>
+    <string name="notification_channel_name">Транскрипция</string>
+    <string name="notification_cancel">Отменить транскрипцию</string>
+    <string name="notification_error">Транскрипция завершилась с ошибкой</string>
+    <string name="notification_progress">%1$s %2$d%%</string>
+
+    <string name="error_no_audio">Не выбран аудиофайл</string>
+    <string name="error_no_models">Сначала загрузите модель распознавания</string>
+    <string name="transcript_empty">Транскрипция пуста</string>
+</resources>

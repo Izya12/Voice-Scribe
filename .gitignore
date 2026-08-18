@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+local.properties
+captures/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Kotlin
+.kotlin/
+
+# Keystores (do not commit)
+*.jks
+*.keystore
+
+# Logs
+*.log
