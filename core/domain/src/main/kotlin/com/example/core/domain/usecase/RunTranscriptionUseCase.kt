@@ -2,6 +2,7 @@
 
 import com.example.core.domain.engine.DiarizationEngine
 import com.example.core.domain.engine.LanguageDetector
+import com.example.core.domain.engine.RecognizedWord
 import com.example.core.domain.engine.SpeechEngine
 import com.example.core.domain.engine.SpeechSegment
 import com.example.core.domain.engine.SpeakerSegment
@@ -169,25 +170,81 @@ class DefaultRunTranscriptionUseCase(
                 val result = speech.transcribe(segmentPcm, model, languageCode)
                 println("[RunTranscription]   done text=\"${result.text.take(60)}\"")
 
-val speakerId = assignSpeaker(seg, speakerSegments, speakerIdByCluster)
-
-                segments += TranscriptionSegment(
-                    id = 0L,
-                    jobId = jobId,
-                    startUs = seg.startUs,
-                    endUs = seg.endUs,
-                    text = result.text,
-                    speakerId = speakerId,
-                )
-                words += result.words.map { word ->
-                    Word(
+                // sherpa whisper returns token-level words whose timestamps are
+                // all zero (start==end==0), so per-word turn mapping is only
+                // possible when real timestamps are present. Otherwise keep the
+                // chunk as one segment: text stays the clean recognizer output
+                // and the speaker is the turn that dominates the chunk's span
+                // (not its midpoint — that missed most segments before).
+                val wordTimestampsUsable = result.words.isNotEmpty() && result.words.any { it.endUs > 0L }
+                if (speakerSegments.isEmpty() || !wordTimestampsUsable) {
+                    val speakerId = dominantSpeakerId(seg, speakerSegments, speakerIdByCluster)
+                    segments += TranscriptionSegment(
                         id = 0L,
-                        segmentId = index.toLong(),
-                        word = word.word,
-                        startUs = seg.startUs + word.startUs,
-                        endUs = seg.startUs + word.endUs,
-                        confidence = word.confidence,
+                        jobId = jobId,
+                        startUs = seg.startUs,
+                        endUs = seg.endUs,
+                        text = result.text,
+                        speakerId = speakerId,
                     )
+                    val segmentIndex = segments.size - 1
+                    words += result.words.map { word ->
+                        Word(
+                            id = 0L,
+                            segmentId = segmentIndex.toLong(),
+                            word = word.word,
+                            startUs = seg.startUs + word.startUs,
+                            endUs = seg.startUs + word.endUs,
+                            confidence = word.confidence,
+                        )
+                    }
+                } else {
+                    // Word timestamps exist: group consecutive words by the
+                    // diarization turn covering their midpoint, one segment
+                    // per turn. Chunk boundaries (fixed 29 s or merged VAD)
+                    // never match speaker turns, so this yields per-turn
+                    // labels with exact word-aligned boundaries.
+                    val pieces: List<Pair<Int?, List<RecognizedWord>>> = buildList {
+                        result.words.forEach { w ->
+                            val wMid = seg.startUs + (w.startUs + w.endUs) / 2
+                            val cluster = speakerSegments
+                                .firstOrNull { wMid in it.startUs until it.endUs }
+                                ?.speakerId
+                            val last = lastOrNull()
+                            if (last == null || last.first != cluster) {
+                                add(cluster to listOf(w))
+                            } else {
+                                set(size - 1, last.first to (last.second + w))
+                            }
+                        }
+                    }
+                    pieces.forEach { (cluster, ws) ->
+                        val speakerId = cluster?.let {
+                            speakerIdByCluster.getOrPut(it) { speakerIdByCluster.size + 1L }
+                        }
+                        val startUs = seg.startUs + (ws.firstOrNull()?.startUs ?: 0L)
+                        val endUs = seg.startUs + (ws.lastOrNull()?.endUs ?: (seg.endUs - seg.startUs))
+                        val text = ws.joinToString(" ") { it.word }
+                        segments += TranscriptionSegment(
+                            id = 0L,
+                            jobId = jobId,
+                            startUs = startUs,
+                            endUs = endUs,
+                            text = text,
+                            speakerId = speakerId,
+                        )
+                        val segmentIndex = segments.size - 1
+                        words += ws.map { word ->
+                            Word(
+                                id = 0L,
+                                segmentId = segmentIndex.toLong(),
+                                word = word.word,
+                                startUs = seg.startUs + word.startUs,
+                                endUs = seg.startUs + word.endUs,
+                                confidence = word.confidence,
+                            )
+                        }
+                    }
                 }
                 send(JobProgress(jobId, JobState.TRANSCRIBING, (index + 1f) / speechSegments.size))
             }
@@ -212,18 +269,26 @@ val speakerId = assignSpeaker(seg, speakerSegments, speakerIdByCluster)
         }
     }
 
-private fun assignSpeaker(
+    /**
+     * Labels a chunk with the diarization turn that covers the most of its
+     * span. Robust to gaps (a midpoint can land in silence between turns).
+     */
+    private fun dominantSpeakerId(
         seg: SpeechSegment,
         speakerSegments: List<SpeakerSegment>,
         speakerIdByCluster: MutableMap<Int, Long>,
     ): Long? {
         if (speakerSegments.isEmpty()) return null
-        val midpoint = (seg.startUs + seg.endUs) / 2
-        val cluster = speakerSegments
-            .firstOrNull { midpoint in it.startUs until it.endUs }
-            ?.speakerId
-            ?: return null
-        return speakerIdByCluster.getOrPut(cluster) { speakerIdByCluster.size + 1L }
+        val overlapUs = mutableMapOf<Int, Long>()
+        speakerSegments.forEach { s ->
+            val start = maxOf(s.startUs, seg.startUs)
+            val end = minOf(s.endUs, seg.endUs)
+            if (end > start) {
+                overlapUs[s.speakerId] = (overlapUs[s.speakerId] ?: 0L) + (end - start)
+            }
+        }
+        val best = overlapUs.maxByOrNull { it.value } ?: return null
+        return speakerIdByCluster.getOrPut(best.key) { speakerIdByCluster.size + 1L }
     }
 
     private suspend fun resolveModel(job: TranscriptionJob): ModelDescriptor {

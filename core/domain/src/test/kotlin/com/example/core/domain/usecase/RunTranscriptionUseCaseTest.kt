@@ -255,24 +255,162 @@ class RunTranscriptionUseCaseTest {
                     SpeechSegment(s, s + 10_000_000L)
                 }
         }
+        val sliceSizes = mutableListOf<Int>()
+        val speech = object : SpeechEngine {
+            override suspend fun transcribe(
+                pcm: FloatArray,
+                model: ModelDescriptor,
+                language: String?,
+            ): RecognitionResult {
+                sliceSizes += pcm.size
+                return fakeSpeech.transcribe(pcm, model, language)
+            }
+        }
         val useCase = DefaultRunTranscriptionUseCase(
             jobs = repo,
             models = FakeModelRepository(model),
             vad = snippetVad,
             diarization = fakeDiarization,
             language = fakeLanguage,
-            speech = fakeSpeech,
+            speech = speech,
         )
 
         useCase.invoke("j1").toList()
 
-        // 0-20 s and 20-40 s (cap = 29 s): 2 merged chunks, not 4 snippets.
+        // Merged into 2 chunks of 20 s each (cap = 29 s), not 4 snippets.
+        assertEquals(listOf(320_000, 320_000), sliceSizes)
+        assertEquals(2, repo.savedTranscript?.segments?.size)
+        assertEquals(4, repo.savedTranscript?.words?.size)
+    }
+
+    @Test
+    fun `words are split into per-speaker turns when diarization is enabled`() = runTest {
+        val repo = FakeTranscriptionRepository(job(jobId = "j1"))
+        val speech = object : SpeechEngine {
+            override suspend fun transcribe(
+                pcm: FloatArray,
+                model: ModelDescriptor,
+                language: String?,
+            ): RecognitionResult = RecognitionResult(
+                text = "one two three",
+                language = language,
+                // turn (0-1500) covers one/two, turn (1500-3000) covers three
+                words = listOf(
+                    RecognizedWord("one", 0L, 500L, 0.9f),
+                    RecognizedWord("two", 600L, 1100L, 0.9f),
+                    RecognizedWord("three", 1600L, 2100L, 0.9f),
+                ),
+            )
+        }
+        val useCase = DefaultRunTranscriptionUseCase(
+            jobs = repo,
+            models = FakeModelRepository(model),
+            vad = fakeVad,
+            diarization = fakeDiarization,
+            language = fakeLanguage,
+            speech = speech,
+        )
+
+        useCase.invoke("j1").toList()
+
         val segments = repo.savedTranscript?.segments.orEmpty()
         assertEquals(2, segments.size)
         assertEquals(0L, segments[0].startUs)
-        assertEquals(20_000_000L, segments[0].endUs)
-        assertEquals(20_000_000L, segments[1].startUs)
-        assertEquals(40_000_000L, segments[1].endUs)
+        assertEquals(1100L, segments[0].endUs)
+        assertEquals("one two", segments[0].text)
+        assertEquals(1L, segments[0].speakerId)
+        assertEquals(1600L, segments[1].startUs)
+        assertEquals(2100L, segments[1].endUs)
+        assertEquals("three", segments[1].text)
+        assertEquals(2L, segments[1].speakerId)
+        assertEquals(3, repo.savedTranscript?.words?.size)
+    }
+
+    @Test
+    fun `word in a diarization gap yields an unlabeled segment`() = runTest {
+        val repo = FakeTranscriptionRepository(job(jobId = "j1"))
+        val gappyDiarization = object : DiarizationEngine {
+            override suspend fun diarize(
+                pcm: FloatArray,
+                numSpeakers: Int?,
+            ): List<SpeakerSegment> = listOf(
+                SpeakerSegment(0L, 1000L, 0),
+                SpeakerSegment(2000L, 3000L, 1),
+            )
+        }
+        val speech = object : SpeechEngine {
+            override suspend fun transcribe(
+                pcm: FloatArray,
+                model: ModelDescriptor,
+                language: String?,
+            ): RecognitionResult = RecognitionResult(
+                text = "one two three",
+                language = language,
+                // "two" (mid 1050) falls between the two turns
+                words = listOf(
+                    RecognizedWord("one", 0L, 500L, 0.9f),
+                    RecognizedWord("two", 1000L, 1100L, 0.9f),
+                    RecognizedWord("three", 2000L, 2500L, 0.9f),
+                ),
+            )
+        }
+        val useCase = DefaultRunTranscriptionUseCase(
+            jobs = repo,
+            models = FakeModelRepository(model),
+            vad = fakeVad,
+            diarization = gappyDiarization,
+            language = fakeLanguage,
+            speech = speech,
+        )
+
+        useCase.invoke("j1").toList()
+
+        val segments = repo.savedTranscript?.segments.orEmpty()
+        assertEquals(3, segments.size)
+        assertEquals(1L, segments[0].speakerId)
+        assertEquals(null, segments[1].speakerId)
+        assertEquals(2L, segments[2].speakerId)
+    }
+
+    @Test
+    fun `zero word timestamps keep chunk text intact and label by dominant turn`() = runTest {
+        val repo = FakeTranscriptionRepository(job(jobId = "j1"))
+        // sherpa whisper reports token-level words with start==end==0.
+        val speech = object : SpeechEngine {
+            override suspend fun transcribe(
+                pcm: FloatArray,
+                model: ModelDescriptor,
+                language: String?,
+            ): RecognitionResult = RecognitionResult(
+                text = "Да. Помнишь там письмо?",
+                language = language,
+                words = listOf(
+                    RecognizedWord("Да", 0L, 0L, 0.9f),
+                    RecognizedWord("Пом", 0L, 0L, 0.9f),
+                    RecognizedWord("ни", 0L, 0L, 0.9f),
+                    RecognizedWord("шь", 0L, 0L, 0.9f),
+                ),
+            )
+        }
+        val useCase = DefaultRunTranscriptionUseCase(
+            jobs = repo,
+            models = FakeModelRepository(model),
+            vad = fakeVad,
+            diarization = fakeDiarization,
+            language = fakeLanguage,
+            speech = speech,
+        )
+
+        useCase.invoke("j1").toList()
+
+        // Merged chunk [0-3000]; turns (0-1500, 1500-3000) tie -> first wins.
+        val segments = repo.savedTranscript?.segments.orEmpty()
+        assertEquals(1, segments.size)
+        assertEquals(0L, segments[0].startUs)
+        assertEquals(3000L, segments[0].endUs)
+        assertEquals("Да. Помнишь там письмо?", segments[0].text)
+        assertEquals(1L, segments[0].speakerId)
+        assertEquals(4, repo.savedTranscript?.words?.size)
     }
 
     @Test

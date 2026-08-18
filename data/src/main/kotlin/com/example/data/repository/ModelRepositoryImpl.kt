@@ -22,7 +22,6 @@ import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
-import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,10 +29,13 @@ import javax.inject.Singleton
  * Room + filesystem backed [ModelRepository] and [SherpaModelFiles] (§8).
  *
  * Models live in `filesDir/models` and are installed atomically: download to a
- * `.tmp` in cacheDir, verify SHA-256 on the fly (§8.2), then either atomically
- * move a plain `.onnx` into place or extract a `.tar.bz2` archive into
- * `filesDir/models/<modelId>/`. The active model is protected from deletion
- * (§37) and switching is a sequential unload→GC→load (§38).
+ * `.tmp` in cacheDir with resume support (`Range`/206, [ResumableDownloader]),
+ * verify SHA-256 on the fly (§8.2), then either atomically move a plain
+ * `.onnx` into place or extract a `.tar.bz2` archive into
+ * `filesDir/models/<modelId>/`. A partial `.tmp` survives failed attempts so
+ * the next download continues from the break point. The active model is
+ * protected from deletion (§37) and switching is a sequential unload→GC→load
+ * (§38).
  */
 @Singleton
 class ModelRepositoryImpl @Inject constructor(
@@ -67,13 +69,12 @@ class ModelRepositoryImpl @Inject constructor(
 
     override suspend fun download(model: ModelDescriptor, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
         val tmp = File(tmpDir, "${model.fileName}.tmp")
-        try {
-            downloadWithChecksum(model, tmp, onProgress)
-            installVerified(model, tmp)
-            dao.upsertModel(ModelEntity(id = model.id, fileName = model.fileName))
-        } finally {
-            if (tmp.exists()) tmp.delete()
-        }
+        downloadWithChecksum(model, tmp, onProgress)
+        installVerified(model, tmp)
+        dao.upsertModel(ModelEntity(id = model.id, fileName = model.fileName))
+        // A verified-complete temp is no longer needed; on failure the partial
+        // is intentionally kept so the next attempt resumes (Range/206).
+        if (tmp.exists()) tmp.delete()
     }
 
     /**
@@ -130,31 +131,10 @@ class ModelRepositoryImpl @Inject constructor(
         tmp: File,
         onProgress: (Float) -> Unit,
     ) {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val connection = java.net.URL(model.sourceUrl).openConnection() as java.net.HttpURLConnection
-        connection.connectTimeout = 30_000
-        connection.readTimeout = 30_000
-        connection.instanceFollowRedirects = true
-        try {
-            val total = connection.contentLengthLong
-            connection.inputStream.use { input ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                var read: Int
-                var downloaded = 0L
-                tmp.outputStream().use { out ->
-                    while (input.read(buffer).also { read = it } != -1) {
-                        out.write(buffer, 0, read)
-                        digest.update(buffer, 0, read)
-                        downloaded += read
-                        if (total > 0) onProgress(downloaded.toFloat() / total.toFloat())
-                    }
-                }
-            }
-        } finally {
-            connection.disconnect()
-        }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        val actual = ResumableDownloader.download(model.sourceUrl, tmp, onProgress)
         if (actual != model.sha256.lowercase()) {
+            // A mismatching partial would poison every future resume.
+            if (tmp.exists()) tmp.delete()
             throw ModelManagerException(
                 "SHA-256 mismatch for ${model.id}: expected ${model.sha256}, got $actual",
             )
