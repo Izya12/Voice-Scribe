@@ -8,6 +8,7 @@ import com.example.data.database.VoiceScribeDao
 import com.example.data.database.entity.ModelEntity
 import com.example.data.model.ModelCatalog
 import com.example.engine.model.DiarizationModelFiles
+import com.example.engine.model.NemoCtcModelFiles
 import com.example.engine.model.SherpaModelFiles
 import com.example.engine.model.WhisperModelFiles
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -80,7 +81,8 @@ class ModelRepositoryImpl @Inject constructor(
     /**
      * Moves a verified download into its final location. Plain `.onnx` files
      * are placed directly in `models/`; `.tar.bz2` archives are extracted into
-     * `models/<modelId>/`.
+     * `models/<modelId>/`. Sidecar [ModelDescriptor.extraFiles] are downloaded
+     * into `models/` with their own SHA-256 check.
      */
     private fun installVerified(model: ModelDescriptor, tmp: File) {
         if (model.fileName.endsWith(".tar.bz2")) {
@@ -93,6 +95,24 @@ class ModelRepositoryImpl @Inject constructor(
             if (target.exists()) target.delete()
             if (!tmp.renameTo(target)) {
                 tmp.copyTo(target, overwrite = true)
+            }
+        }
+        model.extraFiles.forEach { extra ->
+            val extraTmp = File(tmpDir, "${extra.name}.tmp")
+            try {
+                val actual = ResumableDownloader.download(extra.sourceUrl, extraTmp) {}
+                if (actual != extra.sha256.lowercase()) {
+                    throw ModelManagerException(
+                        "SHA-256 mismatch for ${extra.name}: expected ${extra.sha256}, got $actual",
+                    )
+                }
+                val target = File(modelsDir, extra.name)
+                if (target.exists()) target.delete()
+                if (!extraTmp.renameTo(target)) {
+                    extraTmp.copyTo(target, overwrite = true)
+                }
+            } finally {
+                if (extraTmp.exists()) extraTmp.delete()
             }
         }
     }
@@ -192,6 +212,23 @@ class ModelRepositoryImpl @Inject constructor(
     private fun firstExisting(dir: File, vararg names: String): File? =
         names.firstOrNull { File(dir, it).exists() }?.let { File(dir, it) }
 
+    override fun nemo(model: ModelDescriptor): NemoCtcModelFiles? {
+        if (!modelFilesOnDisk(model.id)) return null
+        return when (model.id) {
+            // Extracted from the k2-fsa archive into models/<modelId>/.
+            "gigaam-v3" -> NemoCtcModelFiles(
+                model = File(modelDir(model.id), "model.int8.onnx").absolutePath,
+                tokens = File(modelDir(model.id), "tokens.txt").absolutePath,
+            )
+            // Plain .onnx + sidecar vocab in models/.
+            "gigaam-multilingual" -> NemoCtcModelFiles(
+                model = File(modelsDir, "multilingual_ctc.int8.onnx").absolutePath,
+                tokens = File(modelsDir, "multilingual_vocab.txt").absolutePath,
+            )
+            else -> null
+        }
+    }
+
     override fun vadModel(): String? {
         val file = File(modelsDir, "silero_vad_v5.onnx")
         return file.takeIf { it.exists() }?.absolutePath
@@ -210,13 +247,15 @@ class ModelRepositoryImpl @Inject constructor(
 
     private fun modelFilesOnDisk(modelId: String): Boolean {
         val catalogModel = ModelCatalog.catalog.firstOrNull { it.id == modelId } ?: return false
-        return if (catalogModel.fileName.endsWith(".tar.bz2")) {
+        val mainPresent = if (catalogModel.fileName.endsWith(".tar.bz2")) {
             val dir = File(modelsDir, modelId)
             // An empty extraction dir means the archive failed to unpack — treat as not installed.
             dir.exists() && (dir.listFiles()?.isNotEmpty() == true)
         } else {
             File(modelsDir, catalogModel.fileName).exists()
         }
+        if (!mainPresent) return false
+        return catalogModel.extraFiles.all { File(modelsDir, it.name).exists() }
     }
 
     private fun modelFilesOnDiskList(modelId: String): List<File> {
@@ -226,6 +265,7 @@ class ModelRepositoryImpl @Inject constructor(
         } else {
             File(modelsDir, catalogModel.fileName)
         }
-        return if (file.exists()) listOf(file) else emptyList()
+        val extra = catalogModel.extraFiles.map { File(modelsDir, it.name) }
+        return if (file.exists()) listOf(file) + extra else emptyList()
     }
 }

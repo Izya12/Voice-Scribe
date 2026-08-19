@@ -14,6 +14,9 @@ interface SherpaModelFiles {
     /** Whisper encoder/decoder/tokens for an ASR model, or null if not installed. */
     fun whisper(model: ModelDescriptor): WhisperModelFiles?
 
+    /** NeMo CTC (GigaAM) model + tokens for an ASR model, or null if not installed. */
+    fun nemo(model: ModelDescriptor): NemoCtcModelFiles?
+
     /** Silero VAD ONNX model path, or null if not installed. */
     fun vadModel(): String?
 
@@ -27,6 +30,14 @@ interface SherpaModelFiles {
 data class WhisperModelFiles(
     val encoder: String,
     val decoder: String,
+    val tokens: String,
+)
+
+/**
+ * NeMo CTC (GigaAM) model file set (model + token list).
+ */
+data class NemoCtcModelFiles(
+    val model: String,
     val tokens: String,
 )
 

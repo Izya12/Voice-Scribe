@@ -1,6 +1,7 @@
 package com.example.data.model
 
 import com.example.core.model.ModelDescriptor
+import com.example.core.model.ModelExtraFile
 import com.example.core.model.ModelTier
 
 /**
@@ -46,6 +47,33 @@ object ModelCatalog {
             sha256 = "614b1172557049069d846c29d9399640bce83a4dd6c580decebd9ce2a4f32c33",
             license = "MIT",
             tier = ModelTier.HIGH,
+        ),
+        ModelDescriptor(
+            id = "gigaam-v3",
+            displayName = "GigaAM v3 Russian (CTC int8)",
+            fileName = "sherpa-onnx-nemo-ctc-giga-am-v3-russian-2025-12-16.tar.bz2",
+            fileSizeBytes = 163_286_197,
+            sourceUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-ctc-giga-am-v3-russian-2025-12-16.tar.bz2",
+            sha256 = "e1291d704460cab4a01716081170c86c12f6b15338a1534f71cc5956922adb52",
+            license = "MIT",
+            tier = ModelTier.MID,
+        ),
+        ModelDescriptor(
+            id = "gigaam-multilingual",
+            displayName = "GigaAM Multilingual RU/KK/KY/UZ (CTC int8)",
+            fileName = "multilingual_ctc.int8.onnx",
+            fileSizeBytes = 224_762_204,
+            sourceUrl = "https://huggingface.co/istupakov/gigaam-multilingual-ctc-onnx/resolve/main/multilingual_ctc.int8.onnx",
+            sha256 = "e08e27ae5669b39f0c378fae101bbbb9a80505f74f9b66719c309bf5b894a480",
+            license = "MIT",
+            tier = ModelTier.HIGH,
+            extraFiles = listOf(
+                ModelExtraFile(
+                    name = "multilingual_vocab.txt",
+                    sourceUrl = "https://huggingface.co/istupakov/gigaam-multilingual-ctc-onnx/resolve/main/multilingual_vocab.txt",
+                    sha256 = "4d130287892e1099fedfb3f93c4b4cf8a263151158801680b28977d1be4133f4",
+                ),
+            ),
         ),
         ModelDescriptor(
             id = "silero-vad",

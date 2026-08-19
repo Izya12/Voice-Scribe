@@ -295,7 +295,7 @@ class DefaultRunTranscriptionUseCase(
 
     private suspend fun resolveModel(job: TranscriptionJob): ModelDescriptor {
         val installed = models.observeInstalledModels().first()
-        val asrModels = installed.filter { it.id.startsWith(ASR_MODEL_PREFIX) }
+        val asrModels = installed.filter { isAsrModel(it.id) }
         if (asrModels.isEmpty()) {
             throw ModelManagerException("No ASR model installed")
         }
@@ -394,8 +394,13 @@ private companion object {
         const val WHISPER_CHUNK_SAMPLES = 29 * SAMPLE_RATE_HZ
         /** Same window expressed in µs for the VAD segment merger. */
         const val WHISPER_CHUNK_SAMPLES_US = 29_000_000L
-        /** ASR models are catalogued with a `whisper-*` id; VAD/speaker models are excluded. */
+        /** ASR models are catalogued with a `whisper-*` or `gigaam-*` id; VAD/speaker models are excluded. */
         const val ASR_MODEL_PREFIX = "whisper-"
+        const val NEMO_MODEL_PREFIX = "gigaam-"
+
+        /** True for ASR (transcribable) model ids — Whisper and GigaAM (NeMo CTC). */
+        fun isAsrModel(modelId: String): Boolean =
+            modelId.startsWith(ASR_MODEL_PREFIX) || modelId.startsWith(NEMO_MODEL_PREFIX)
 
         /** Exact µs → sample conversion; avoids 1_000_000/16_000 integer truncation. */
         private fun usToSamples(us: Long): Int = (us * SAMPLE_RATE_HZ / 1_000_000L).toInt()

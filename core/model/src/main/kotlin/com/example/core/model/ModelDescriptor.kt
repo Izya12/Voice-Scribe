@@ -16,6 +16,17 @@ data class ModelDescriptor(
     val sha256: String,
     val license: String,
     val tier: ModelTier,
+    val extraFiles: List<ModelExtraFile> = emptyList(),
+)
+
+/**
+ * Sidecar file downloaded alongside a plain (non-archive) model — e.g. the
+ * token list for a GigaAM CTC model hosted as a separate file.
+ */
+data class ModelExtraFile(
+    val name: String,
+    val sourceUrl: String,
+    val sha256: String,
 )
 
 /**

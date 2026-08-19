@@ -6,9 +6,12 @@ import com.example.core.domain.engine.RecognitionResult
 import com.example.core.domain.engine.SpeechEngine
 import com.example.core.domain.error.RecognitionException
 import com.example.core.model.ModelDescriptor
+import com.example.engine.model.NemoCtcModelFiles
 import com.example.engine.model.SherpaModelFiles
+import com.example.engine.model.WhisperModelFiles
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineNemoEncDecCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
@@ -17,7 +20,8 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Whisper ASR adapter over `sherpa-onnx` OfflineRecognizer (§3, step 6).
+ * Whisper / GigaAM (NeMo CTC) ASR adapter over `sherpa-onnx` OfflineRecognizer
+ * (§3, step 6).
  *
  * Native objects are cached per [ModelDescriptor.id] and guarded by a
  * per-instance lock so no two coroutines touch the same `ptr` concurrently
@@ -42,15 +46,22 @@ class SherpaWhisperEngine(
             // (SIGSEGV in OfflineRecognizer.decode).
             throw RecognitionException("Cannot transcribe empty audio")
         }
-        val files = modelFiles.whisper(model)
-            ?: throw RecognitionException("Whisper model files missing: ${model.id}")
-        checkModelFiles(files)
-        val recognizer = recognizerFor(model, files, language)
+        val recognizer = if (model.id.startsWith(NEMO_MODEL_PREFIX)) {
+            val files = modelFiles.nemo(model)
+                ?: throw RecognitionException("NeMo CTC model files missing: ${model.id}")
+            checkModelFiles(files)
+            recognizerFor(model, files, language)
+        } else {
+            val files = modelFiles.whisper(model)
+                ?: throw RecognitionException("Whisper model files missing: ${model.id}")
+            checkModelFiles(files)
+            recognizerFor(model, files, language)
+        }
         synchronized(lock) {
             val stream = try {
                 recognizer.createStream()
             } catch (e: RuntimeException) {
-                throw RecognitionException("Failed to create Whisper stream", e)
+                throw RecognitionException("Failed to create ASR stream", e)
             }
             try {
                 stream.acceptWaveform(pcm, SAMPLE_RATE_HZ)
@@ -59,7 +70,7 @@ class SherpaWhisperEngine(
             } catch (e: RecognitionException) {
                 throw e
             } catch (e: RuntimeException) {
-                throw RecognitionException("Whisper inference failed", e)
+                throw RecognitionException("ASR inference failed", e)
             } finally {
                 stream.release()
             }
@@ -75,7 +86,7 @@ class SherpaWhisperEngine(
 
     private fun recognizerFor(
         model: ModelDescriptor,
-        files: com.example.engine.model.WhisperModelFiles,
+        files: WhisperModelFiles,
         language: String?,
     ): OfflineRecognizer {
         // The language is baked into the native config at construction time, so
@@ -83,15 +94,28 @@ class SherpaWhisperEngine(
         // created (e.g. with "en") is reused for every later language choice.
         val key = cacheKey(model.id, language)
         return cache[key] ?: synchronized(lock) {
-            cache[key] ?: createRecognizer(model, files, language).also { cache[key] = it }
+            cache[key] ?: createWhisperRecognizer(model, files, language).also { cache[key] = it }
+        }
+    }
+
+    private fun recognizerFor(
+        model: ModelDescriptor,
+        files: NemoCtcModelFiles,
+        language: String?,
+    ): OfflineRecognizer {
+        // NeMo CTC models are language-agnostic at construction time (the
+        // language is baked into the model itself), so the key is just the id.
+        val key = cacheKey(model.id, null)
+        return cache[key] ?: synchronized(lock) {
+            cache[key] ?: createNemoRecognizer(model, files).also { cache[key] = it }
         }
     }
 
     private fun cacheKey(modelId: String, language: String?): String = "$modelId|${language ?: ""}"
 
-    private fun createRecognizer(
+    private fun createWhisperRecognizer(
         model: ModelDescriptor,
-        files: com.example.engine.model.WhisperModelFiles,
+        files: WhisperModelFiles,
         language: String?,
     ): OfflineRecognizer {
         val whisper = OfflineWhisperModelConfig(
@@ -131,12 +155,54 @@ class SherpaWhisperEngine(
         }
     }
 
-    private fun checkModelFiles(files: com.example.engine.model.WhisperModelFiles) {
+    private fun createNemoRecognizer(
+        model: ModelDescriptor,
+        files: NemoCtcModelFiles,
+    ): OfflineRecognizer {
+        val nemo = OfflineNemoEncDecCtcModelConfig(model = files.model)
+        val modelConfig = OfflineModelConfig(
+            nemo = nemo,
+            numThreads = numThreads,
+            debug = false,
+            provider = "cpu",
+            modelType = "nemo_ctc",
+            tokens = files.tokens,
+        )
+        val featureConfig = FeatureConfig(
+            sampleRate = SAMPLE_RATE_HZ,
+            featureDim = 80,
+            dither = 0f,
+        )
+        val config = OfflineRecognizerConfig(
+            featConfig = featureConfig,
+            modelConfig = modelConfig,
+            decodingMethod = "greedy_search",
+            maxActivePaths = 4,
+        )
+        return try {
+            // Absolute filesystem paths (filesDir) -> null AssetManager, else
+            // sherpa-onnx reads via AAssetManager and abort()s (#2562).
+            OfflineRecognizer(null, config)
+        } catch (e: RuntimeException) {
+            throw RecognitionException("Failed to load NeMo CTC model ${model.id}", e)
+        }
+    }
+
+    private fun checkModelFiles(files: WhisperModelFiles) {
         val missing = listOf("encoder" to files.encoder, "decoder" to files.decoder, "tokens" to files.tokens)
             .filter { (_, p) -> !java.io.File(p).exists() || java.io.File(p).length() == 0L }
             .map { it.first }
         if (missing.isNotEmpty()) {
             throw RecognitionException("Whisper model files missing/empty: ${missing.joinToString()}")
+        }
+    }
+
+    private fun checkModelFiles(files: NemoCtcModelFiles) {
+        val missing = listOf("model" to files.model, "tokens" to files.tokens)
+            .filter { (_, p) -> !java.io.File(p).exists() || java.io.File(p).length() == 0L }
+            .map { it.first }
+        if (missing.isNotEmpty()) {
+            throw RecognitionException("NeMo CTC model files missing/empty: ${missing.joinToString()}")
         }
     }
 
@@ -162,5 +228,6 @@ class SherpaWhisperEngine(
 
     private companion object {
         const val SAMPLE_RATE_HZ = 16_000
+        const val NEMO_MODEL_PREFIX = "gigaam-"
     }
 }

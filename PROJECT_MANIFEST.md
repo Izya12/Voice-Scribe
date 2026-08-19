@@ -7,10 +7,10 @@ This is the canonical state and meta-registry for VoiceScribe, maintained in str
 ## 1. Core Metadata
 
 * **Project Name:** VoiceScribe  
-* **Current State:** `IMPLEMENTED` вЂ” Milestones 0вЂ“7 done (toolchain в†’ scaffold в†’ model/domain/engine/data/app в†’ full build + device install); **Phase C UI (transcript review, search, export, speakers, language, model mgmt) added 2026-08-18**; **Settings/logging + job deletion + error messages added 2026-08-19**  
+* **Current State:** `IMPLEMENTED` вЂ” Milestones 0вЂ“7 done (toolchain в†’ scaffold в†’ model/domain/engine/data/app в†’ full build + device install); **Phase C UI (transcript review, search, export, speakers, language, model mgmt) added 2026-08-18**; **Settings/logging + job deletion + error messages added 2026-08-19**; **GigaAM v3 + GigaAM Multilingual models added 2026-08-19**  
 * **Architecture Version:** `2.0.0`  
 * **Date Created:** 2026-08-10  
-* **Last Updated:** 2026-08-19 (Settings/logging + job deletion session)  
+* **Last Updated:** 2026-08-19 (GigaAM models session)  
 
 ---
 
@@ -87,6 +87,20 @@ All models are specified with strict SHA-256 integrity check registers:
    * **Source:** alibaba-damo-academy/3D-Speaker (via k2-fsa)  
    * **SHA-256 Checksum:** `ab3357ef3cdd6e8aef17bc932df88ab89aef7712cf54eaef33bdfc1122cfddff`  
    * **License:** Apache-2.0  
+
+6. **ASR Model (GigaAM v3, Russian):**  
+   * **Name:** GigaAM v3 Russian CTC ONNX (int8 quantized)  
+   * **File Size:** `163 286 197` bytes (tar.bz2 archive)  
+   * **Source:** k2-fsa/sherpa-onnx asr-models (official checksum.txt entry)  
+   * **SHA-256 Checksum:** `e1291d704460cab4a01716081170c86c12f6b15338a1534f71cc5956922adb52`  
+   * **License:** MIT (salute-developers/GigaAM)  
+
+7. **ASR Model (GigaAM Multilingual):**  
+   * **Name:** GigaAM Multilingual RU/KK/KY/UZ CTC ONNX (int8 quantized)  
+   * **File Size:** `224 762 204` bytes (onnx) + `multilingual_vocab.txt` sidecar  
+   * **Source:** community conversion `istupakov/gigaam-multilingual-ctc-onnx` (HuggingFace) of the official `gigaam_multilingual` branch (salute-developers/GigaAM) — NO official k2-fsa checksum.txt entry  
+   * **SHA-256 Checksum:** `e08e27ae5669b39f0c378fae101bbbb9a80505f74f9b66719c309bf5b894a480` (vocab: `4d130287892e1099fedfb3f93c4b4cf8a263151158801680b28977d1be4133f4`)  
+   * **License:** MIT  
 
 ---
 
@@ -172,7 +186,18 @@ Blueprint for reference (original Phase 3 output):
 
 ---
 
-## 10. Build Status (2026-08-19 — Settings/logging + job deletion session)
+## 10. Build Status (2026-08-19 - GigaAM models session)
+
+Added two NeMo CTC (GigaAM) ASR models; the ASR engine now branches whisper vs nemo_ctc (verified: `gradlew test` GREEN, `:app:assembleDebug` SUCCESS):
+
+- **GigaAM v3 (RU):** official k2-fsa asr-models release `sherpa-onnx-nemo-ctc-giga-am-v3-russian-2025-12-16.tar.bz2` (163 286 197 B; SHA-256 `e1291d70...2adb52` verified against checksum.txt; MIT). Installed via the existing tar.bz2 flow into `models/gigaam-v3/` (`model.int8.onnx` + `tokens.txt`).
+- **GigaAM Multilingual (RU/KK/KY/UZ):** no official k2-fsa conversion exists — uses the community conversion `istupakov/gigaam-multilingual-ctc-onnx` (HuggingFace) of the official `gigaam_multilingual` branch (salute-developers/GigaAM). Plain `multilingual_ctc.int8.onnx` (224 762 204 B) + sidecar `multilingual_vocab.txt`; SHA-256 computed locally at catalog time (`e08e27ae...4a480` / `4d130287...13f4`). NOTE: third-party host, no upstream checksum.txt entry.
+- **ModelDescriptor.extraFiles:** new sidecar-file support (`ModelExtraFile`, default empty) — sidecars are downloaded + SHA-verified into `models/` alongside plain models; install/delete/installed-checks updated in `ModelRepositoryImpl`.
+- **Engine:** `SherpaWhisperEngine` branches on `gigaam-*` ids → `OfflineNemoEncDecCtcModelConfig` (`modelType="nemo_ctc"`, `greedy_search`, tokens); whisper path unchanged. NeMo recognizer cache key is language-independent (language is baked into the model).
+- **ASR selection:** `RunTranscriptionUseCase.resolveModel` / `isAsrModel` now accept both `whisper-*` and `gigaam-*` ids.
+- **Pending on device:** download + transcribe a Russian clip with GigaAM v3 (VAD on/off), then a multilingual clip to verify.
+
+## 11. Build Status (2026-08-19 - Settings/logging + job deletion session)
 
 Added (all verified: `gradlew test` GREEN 29/29, `:app:assembleDebug` SUCCESS → app-debug.apk):
 
@@ -182,7 +207,7 @@ Added (all verified: `gradlew test` GREEN 29/29, `:app:assembleDebug` SUCCESS �
 - **Error messages on job cards:** Room v1→v2 migration (`MIGRATION_1_2`: `ALTER TABLE transcription_job ADD COLUMN error_message TEXT`; replaced `fallbackToDestructiveMigration`), `errorMessage` on `TranscriptionJob`/`JobEntity`/mapper; `RunTranscriptionUseCase.persistTerminal(jobId, state, errorMessage)` stores the message for FAILED; JobCard renders it in `colorScheme.error`.
 - **Pending on device:** `adb install -r` + verify: (1) Settings tab persists toggle/level and creates `voicescribe.log` after a run, (2) failed job shows its error text, (3) delete removes job + transcript + FTS entries.
 
-## 11. Build Status (2026-08-18 — ASR/VAD bugfix session)
+## 12. Build Status (2026-08-18 - ASR/VAD bugfix session)
 
 Reported device issues and fixes (device was NOT attached; fixes verified by unit tests + assembleDebug only):
 
