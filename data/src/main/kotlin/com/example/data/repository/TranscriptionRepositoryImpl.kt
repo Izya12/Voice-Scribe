@@ -50,6 +50,10 @@ class TranscriptionRepositoryImpl @Inject constructor(
         dao.upsertJob(DomainMapper.jobToEntity(job))
     }
 
+    override suspend fun deleteJob(jobId: String) {
+        dao.deleteJob(jobId)
+    }
+
     override suspend fun saveTranscript(
         jobId: String,
         segments: List<TranscriptionSegment>,

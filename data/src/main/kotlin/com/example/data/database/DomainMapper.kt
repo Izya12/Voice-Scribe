@@ -26,6 +26,7 @@ object DomainMapper {
         filePath = job.filePath,
         createdAtUs = job.createdAtUs,
         updatedAtUs = job.updatedAtUs,
+        errorMessage = job.errorMessage,
         config = ConfigEntity(
             languageMode = job.config.languageMode.name,
             language = job.config.language,
@@ -42,6 +43,7 @@ object DomainMapper {
         filePath = entity.filePath,
         createdAtUs = entity.createdAtUs,
         updatedAtUs = entity.updatedAtUs,
+        errorMessage = entity.errorMessage,
         config = TranscriptionConfig(
             languageMode = runCatching { LanguageMode.valueOf(entity.config.languageMode) }.getOrDefault(LanguageMode.AUTO),
             language = entity.config.language,

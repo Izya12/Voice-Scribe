@@ -40,6 +40,9 @@ class MediaProcessingService : Service() {
     @Inject
     lateinit var progressStore: TranscriptionProgressStore
 
+    @Inject
+    lateinit var logger: com.example.core.domain.logging.AppLogger
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var activeJobId: String? = null
     private var pipelineJob: Job? = null
@@ -58,6 +61,7 @@ class MediaProcessingService : Service() {
             // A startForegroundService() with ACTION_CANCEL (cancel of a
             // not-yet-started job) still requires startForeground() within 5s.
             startForegroundWithType(jobId ?: "cancelled")
+            logger.info(TAG, "cancel requested job=$jobId")
             jobId?.let(progressStore::remove)
             pipelineJob?.cancel()
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -71,12 +75,14 @@ class MediaProcessingService : Service() {
         }
         activeJobId = jobId
         startForegroundWithType(jobId)
+        logger.info(TAG, "pipeline started job=$jobId")
 
         pipelineJob = scope.launch {
             runTranscription.invoke(jobId).collectLatest { progress ->
                 progressStore.update(progress)
                 updateNotification(jobId, progress.state, progress.fraction)
                 if (progress.state.isTerminal) {
+                    logger.info(TAG, "pipeline finished job=$jobId state=${progress.state}")
                     progressStore.remove(jobId)
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
@@ -89,6 +95,7 @@ class MediaProcessingService : Service() {
     override fun onDestroy() {
         scope.cancel()
         activeJobId = null
+        logger.info(TAG, "service destroyed")
         super.onDestroy()
     }
 
@@ -162,6 +169,7 @@ class MediaProcessingService : Service() {
         const val EXTRA_JOB_ID = "com.example.app.extra.JOB_ID"
         const val EXTRA_ACTION = "com.example.app.extra.ACTION"
         const val ACTION_CANCEL = "cancel"
+        private const val TAG = "MediaProcessingService"
         private const val CHANNEL_ID = "transcription"
         private const val NOTIFICATION_ID = 1001
         private const val REQUEST_CANCEL = 1

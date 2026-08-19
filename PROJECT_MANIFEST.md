@@ -7,10 +7,10 @@ This is the canonical state and meta-registry for VoiceScribe, maintained in str
 ## 1. Core Metadata
 
 * **Project Name:** VoiceScribe  
-* **Current State:** `IMPLEMENTED` вЂ” Milestones 0вЂ“7 done (toolchain в†’ scaffold в†’ model/domain/engine/data/app в†’ full build + device install); **Phase C UI (transcript review, search, export, speakers, language, model mgmt) added 2026-08-18**  
+* **Current State:** `IMPLEMENTED` вЂ” Milestones 0вЂ“7 done (toolchain в†’ scaffold в†’ model/domain/engine/data/app в†’ full build + device install); **Phase C UI (transcript review, search, export, speakers, language, model mgmt) added 2026-08-18**; **Settings/logging + job deletion + error messages added 2026-08-19**  
 * **Architecture Version:** `2.0.0`  
 * **Date Created:** 2026-08-10  
-* **Last Updated:** 2026-08-18 (ASR/VAD bugfix session)  
+* **Last Updated:** 2026-08-19 (Settings/logging + job deletion session)  
 
 ---
 
@@ -155,7 +155,7 @@ Blueprint for reference (original Phase 3 output):
 
 ## 8. Test & QA Status
 
-* **Unit Tests Status:** `GREEN` вЂ” 22 tests: `:core:model` 6 (JobState machine), `:core:domain` 9 (RunTranscriptionUseCase), `:data` 7 (TranscriptExporterImpl). Verified 2026-08-18 with Kotlin 2.4.10 / KSP 2.3.11.
+* **Unit Tests Status:** `GREEN` вЂ” 29 tests: `:core:model` 10 (JobState machine 6 + LogLevel 4), `:core:domain` 9 (RunTranscriptionUseCase), `:data` 10 (TranscriptExporterImpl 3 + ResumableDownloader 4 + FileAppLogger 4). Verified 2026-08-19 with Kotlin 2.4.10 / KSP 2.3.11.
 * **Integration Tests Status:** `PENDING` (device-dependent)  
 * **JNI/Native Tests Status:** `PARTIAL` вЂ” null-AssetManager fix verified on device (COMPLETED in logs, no native abort); full end-to-end re-verification pending  
 * **QA Status:** `PENDING`  
@@ -172,7 +172,17 @@ Blueprint for reference (original Phase 3 output):
 
 ---
 
-## 10. Build Status (2026-08-18 — ASR/VAD bugfix session)
+## 10. Build Status (2026-08-19 — Settings/logging + job deletion session)
+
+Added (all verified: `gradlew test` GREEN 29/29, `:app:assembleDebug` SUCCESS → app-debug.apk):
+
+- **Settings tab («Настройки»):** third `NavigationBar` tab (`Icons.Filled.Settings`) with file-logging Switch + log-level dropdown (Отладка/Инфо/Предупреждения/Ошибки) + shown log path (`filesDir/logs/voicescribe.log`). New `SettingsViewModel`/`SettingsUiState` (sample: `ModelsViewModel`); persistence via `SettingsRepository` → `SettingsRepositoryImpl` (SharedPreferences `settings.xml`, keys `logging_enabled`/`log_level`, defaults false/INFO; `callbackFlow` + `OnSharedPreferenceChangeListener`; each write re-configures the logger immediately, no restart).
+- **File logging:** `LogLevel` (core:model, DEBUG(0)..ERROR(3), `canLog` filter), `AppLogger` (core:domain interface), `FileAppLogger` (data; `@Singleton`, `synchronized` append writes, rotation at 5 MB keeping 3 files, `@Volatile enabled/level`, write failures silently dropped). DI: `FileAppLogger(File(filesDir,"logs"))` + `@Binds AppLogger`. Wired into `RunTranscriptionUseCase` (all stage transitions, terminal persist with error), `MainViewModel` (submit/delete), `MediaProcessingService` (start/cancel/finish), `SettingsViewModel`, and `VoiceScribeApp` (`Thread.setDefaultUncaughtExceptionHandler` → log).
+- **Job deletion:** `VoiceScribeDao.deleteJob` (`DELETE FROM transcription_job WHERE id = :jobId`; segment/word/speaker/statistics cascade via FK, FTS4 shadow syncs via Room triggers) → `TranscriptionRepository.deleteJob` → `MainViewModel.deleteJob` (blocks active jobs, snackbar on error) → JobCard «Удалить» button for terminal states (COMPLETED/FAILED/CANCELLED) + confirmation `AlertDialog`.
+- **Error messages on job cards:** Room v1→v2 migration (`MIGRATION_1_2`: `ALTER TABLE transcription_job ADD COLUMN error_message TEXT`; replaced `fallbackToDestructiveMigration`), `errorMessage` on `TranscriptionJob`/`JobEntity`/mapper; `RunTranscriptionUseCase.persistTerminal(jobId, state, errorMessage)` stores the message for FAILED; JobCard renders it in `colorScheme.error`.
+- **Pending on device:** `adb install -r` + verify: (1) Settings tab persists toggle/level and creates `voicescribe.log` after a run, (2) failed job shows its error text, (3) delete removes job + transcript + FTS entries.
+
+## 11. Build Status (2026-08-18 — ASR/VAD bugfix session)
 
 Reported device issues and fixes (device was NOT attached; fixes verified by unit tests + assembleDebug only):
 

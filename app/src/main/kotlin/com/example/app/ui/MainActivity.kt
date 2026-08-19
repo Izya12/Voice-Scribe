@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -58,6 +59,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.core.domain.usecase.JobProgress
 import com.example.core.model.JobState
+import com.example.core.model.LogLevel
 import com.example.core.model.ModelDescriptor
 import com.example.core.model.TranscriptionJob
 import dagger.hilt.android.AndroidEntryPoint
@@ -67,6 +69,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
     private val modelsViewModel: ModelsViewModel by viewModels()
+    private val settingsViewModel: SettingsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,6 +89,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                                         viewModel.createJobAndTranscribe(uri, useVad, diarize, language)
                                     },
                                     onCancel = viewModel::cancelJob,
+                                    onDeleteJob = viewModel::deleteJob,
                                     onOpenJob = { jobId ->
                                         navController.navigate("transcript/$jobId")
                                     },
@@ -95,6 +99,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
                                     onDownload = modelsViewModel::download,
                                     onActivateModel = modelsViewModel::activate,
                                     onDeleteModel = modelsViewModel::delete,
+                                    settingsState = settingsViewModel.uiState.collectAsStateWithLifecycle().value,
+                                    settingsError = settingsViewModel.error.collectAsStateWithLifecycle().value,
+                                    onDismissSettingsError = settingsViewModel::clearError,
+                                    onLoggingEnabledChange = settingsViewModel::setLoggingEnabled,
+                                    onLogLevelChange = settingsViewModel::setLogLevel,
                                 )
                             }
                             composable(
@@ -114,6 +123,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
 private enum class AppTab(val label: String) {
     TRANSCRIBE("Транскрипция"),
     MODELS("Модели"),
+    SETTINGS("Настройки"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -124,6 +134,7 @@ fun VoiceScribeApp(
     onDismissError: () -> Unit,
     onPickAudio: (Uri, Boolean, Boolean, String?) -> Unit,
     onCancel: (String) -> Unit,
+    onDeleteJob: (String) -> Unit,
     onOpenJob: (String) -> Unit,
     modelsState: ModelsUiState,
     modelsError: String?,
@@ -131,6 +142,11 @@ fun VoiceScribeApp(
     onDownload: (ModelDescriptor) -> Unit,
     onActivateModel: (String) -> Unit,
     onDeleteModel: (String) -> Unit,
+    settingsState: SettingsUiState,
+    settingsError: String?,
+    onDismissSettingsError: () -> Unit,
+    onLoggingEnabledChange: (Boolean) -> Unit,
+    onLogLevelChange: (LogLevel) -> Unit,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.TRANSCRIBE) }
@@ -147,6 +163,12 @@ fun VoiceScribeApp(
             onDismissModelsError()
         }
     }
+    LaunchedEffect(settingsError) {
+        if (settingsError != null) {
+            snackbarHostState.showSnackbar(settingsError)
+            onDismissSettingsError()
+        }
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("VoiceScribe") }) },
@@ -158,10 +180,10 @@ fun VoiceScribeApp(
                         onClick = { selectedTab = tab },
                         icon = {
                             Icon(
-                                imageVector = if (tab == AppTab.TRANSCRIBE) {
-                                    Icons.Filled.PlayArrow
-                                } else {
-                                    Icons.Filled.List
+                                imageVector = when (tab) {
+                                    AppTab.TRANSCRIBE -> Icons.Filled.PlayArrow
+                                    AppTab.MODELS -> Icons.Filled.List
+                                    AppTab.SETTINGS -> Icons.Filled.Settings
                                 },
                                 contentDescription = tab.label,
                             )
@@ -178,6 +200,7 @@ fun VoiceScribeApp(
                 state = state,
                 onPickAudio = onPickAudio,
                 onCancel = onCancel,
+                onDeleteJob = onDeleteJob,
                 onOpenJob = onOpenJob,
                 modifier = Modifier
                     .fillMaxSize()
@@ -195,6 +218,16 @@ fun VoiceScribeApp(
                     .padding(padding)
                     .padding(16.dp),
             )
+
+            AppTab.SETTINGS -> SettingsScreen(
+                state = settingsState,
+                onLoggingEnabledChange = onLoggingEnabledChange,
+                onLogLevelChange = onLogLevelChange,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(16.dp),
+            )
         }
     }
 }
@@ -204,12 +237,31 @@ fun TranscriptionScreen(
     state: TranscriptionUiState,
     onPickAudio: (Uri, Boolean, Boolean, String?) -> Unit,
     onCancel: (String) -> Unit,
+    onDeleteJob: (String) -> Unit,
     onOpenJob: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var useVad by rememberSaveable { mutableStateOf(true) }
     var diarize by rememberSaveable { mutableStateOf(false) }
     var language by rememberSaveable { mutableStateOf<String?>(null) }
+    var jobToDelete by remember { mutableStateOf<TranscriptionJob?>(null) }
+
+    jobToDelete?.let { job ->
+        AlertDialog(
+            onDismissRequest = { jobToDelete = null },
+            title = { Text("Удалить задание?") },
+            text = { Text("Транскрипция «${job.filePath.substringAfterLast('/')}» будет удалена безвозвратно.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteJob(job.id)
+                    jobToDelete = null
+                }) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { jobToDelete = null }) { Text("Отмена") }
+            },
+        )
+    }
 
     val audioLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -265,6 +317,7 @@ fun TranscriptionScreen(
                 job = job,
                 progress = state.progress[job.id],
                 onCancel = { onCancel(job.id) },
+                onDelete = { jobToDelete = job },
                 onOpen = if (job.status == JobState.COMPLETED) {
                     { onOpenJob(job.id) }
                 } else {
@@ -371,6 +424,7 @@ private fun JobCard(
     job: TranscriptionJob,
     progress: JobProgress?,
     onCancel: () -> Unit,
+    onDelete: () -> Unit,
     onOpen: (() -> Unit)?,
 ) {
     Card(
@@ -383,18 +437,40 @@ private fun JobCard(
             Row(Modifier.fillMaxWidth()) {
                 Column(Modifier.weight(1f)) {
                     Text(job.filePath.substringAfterLast('/'), style = MaterialTheme.typography.bodyLarge)
-                    Text(statusLabel(job.status), style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        statusLabel(job.status),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (job.status == JobState.FAILED) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
                 }
                 if (!job.status.isTerminal) {
                     OutlinedButton(onClick = onCancel) { Text("Отмена") }
-                } else if (onOpen != null) {
-                    Text(
-                        "Открыть",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (onOpen != null) {
+                            Text(
+                                "Открыть",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 12.dp),
+                            )
+                        }
+                        OutlinedButton(onClick = onDelete) { Text("Удалить") }
+                    }
                 }
+            }
+            val errorMessage = job.errorMessage
+            if (job.status == JobState.FAILED && errorMessage != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    errorMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
             val activeProgress = progress?.takeIf { !it.state.isTerminal && it.fraction > 0f }
             if (activeProgress != null) {

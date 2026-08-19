@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.app.service.MediaProcessingService
+import com.example.core.domain.logging.AppLogger
 import com.example.core.domain.repository.ModelRepository
 import com.example.core.domain.repository.TranscriptionRepository
 import com.example.core.domain.usecase.JobProgress
@@ -34,6 +35,7 @@ class MainViewModel @Inject constructor(
     private val models: ModelRepository,
     private val jobs: TranscriptionRepository,
     private val progressStore: TranscriptionProgressStore,
+    private val logger: AppLogger,
 ) : AndroidViewModel(application) {
 
     private val _error = MutableStateFlow<String?>(null)
@@ -67,6 +69,7 @@ class MainViewModel @Inject constructor(
         )
         viewModelScope.launch {
             jobs.saveJob(job)
+            logger.info(TAG, "submitted job ${job.id}")
             startService(job.id)
         }
     }
@@ -86,7 +89,30 @@ class MainViewModel @Inject constructor(
             try {
                 app.startForegroundService(intent)
             } catch (e: Exception) {
+                logger.error(TAG, "Failed to start cancel intent for job $jobId", e)
                 _error.value = "Не удалось остановить обработку: ${e.message}"
+            }
+        }
+    }
+
+    /**
+     * Removes a finished job (COMPLETED / FAILED / CANCELLED) together with
+     * its transcript. Active jobs must be cancelled first.
+     */
+    fun deleteJob(jobId: String) {
+        viewModelScope.launch {
+            try {
+                val current = jobs.getJob(jobId)
+                if (current != null && !current.status.isTerminal) {
+                    _error.value = "Сначала остановите обработку задания"
+                    return@launch
+                }
+                jobs.deleteJob(jobId)
+                progressStore.remove(jobId)
+                logger.info(TAG, "deleted job $jobId")
+            } catch (e: Exception) {
+                logger.error(TAG, "Failed to delete job $jobId", e)
+                _error.value = "Не удалось удалить задание: ${e.message}"
             }
         }
     }
@@ -96,6 +122,10 @@ class MainViewModel @Inject constructor(
         val intent = Intent(app, MediaProcessingService::class.java)
             .putExtra(MediaProcessingService.EXTRA_JOB_ID, jobId)
         app.startForegroundService(intent)
+    }
+
+    companion object {
+        private const val TAG = "MainViewModel"
     }
 }
 

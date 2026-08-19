@@ -6,7 +6,9 @@ import com.example.core.domain.engine.DiarizationEngine
 import com.example.core.domain.engine.LanguageDetector
 import com.example.core.domain.engine.SpeechEngine
 import com.example.core.domain.engine.VadEngine
+import com.example.core.domain.logging.AppLogger
 import com.example.core.domain.repository.ModelRepository
+import com.example.core.domain.repository.SettingsRepository
 import com.example.core.domain.repository.TranscriptExporter
 import com.example.core.domain.repository.TranscriptionRepository
 import com.example.core.domain.usecase.DefaultRunTranscriptionUseCase
@@ -16,8 +18,10 @@ import com.example.data.audio.AudioResampler
 import com.example.data.database.VoiceScribeDao
 import com.example.data.database.VoiceScribeDatabase
 import com.example.data.export.TranscriptExporterImpl
+import com.example.data.logging.FileAppLogger
 import com.example.data.repository.ModelRepositoryImpl
 import com.example.data.repository.TranscriptionRepositoryImpl
+import com.example.data.settings.SettingsRepositoryImpl
 import com.example.engine.diarization.SherpaDiarizationEngine
 import com.example.engine.lang.SherpaLanguageDetector
 import com.example.engine.model.SherpaModelFiles
@@ -29,6 +33,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.io.File
 import javax.inject.Singleton
 
 /**
@@ -52,6 +57,14 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindTranscriptExporter(impl: TranscriptExporterImpl): TranscriptExporter
+
+    @Binds
+    @Singleton
+    abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindAppLogger(impl: FileAppLogger): AppLogger
 
     // --- Engines (native sherpa adapters) ---
 
@@ -87,7 +100,7 @@ object AppModuleProviders {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): VoiceScribeDatabase =
         Room.databaseBuilder(context, VoiceScribeDatabase::class.java, "voicescribe.db")
-            .fallbackToDestructiveMigration()
+            .addMigrations(VoiceScribeDatabase.MIGRATION_1_2)
             .build()
 
     @Provides
@@ -135,6 +148,11 @@ object AppModuleProviders {
 
     @Provides
     @Singleton
+    fun provideFileAppLogger(@ApplicationContext context: Context): FileAppLogger =
+        FileAppLogger(File(context.filesDir, "logs"))
+
+    @Provides
+    @Singleton
     fun provideRunTranscriptionUseCase(
         jobs: TranscriptionRepository,
         models: ModelRepository,
@@ -142,6 +160,7 @@ object AppModuleProviders {
         diarization: DiarizationEngine,
         language: LanguageDetector,
         speech: SpeechEngine,
+        logger: AppLogger,
     ): RunTranscriptionUseCase = DefaultRunTranscriptionUseCase(
         jobs = jobs,
         models = models,
@@ -149,5 +168,6 @@ object AppModuleProviders {
         diarization = diarization,
         language = language,
         speech = speech,
+        logger = logger,
     )
 }

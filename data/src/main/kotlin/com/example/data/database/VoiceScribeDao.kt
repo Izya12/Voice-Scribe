@@ -38,6 +38,14 @@ interface VoiceScribeDao {
     @Upsert
     suspend fun upsertJob(job: JobEntity)
 
+    /**
+     * Deletes a job and its transcript. segment/word/speaker/statistics rows
+     * cascade via FK ON DELETE CASCADE; the FTS4 shadow table is kept in sync
+     * by the triggers Room generates for the content entity.
+     */
+    @Query("DELETE FROM transcription_job WHERE id = :jobId")
+    suspend fun deleteJob(jobId: String)
+
     @Query("UPDATE transcription_job SET status = :status, updated_at_us = :updatedAtUs WHERE id = :jobId")
     suspend fun updateStatus(jobId: String, status: JobState, updatedAtUs: Long)
 

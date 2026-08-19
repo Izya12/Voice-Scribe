@@ -11,6 +11,7 @@ import com.example.core.domain.error.DecodingException
 import com.example.core.domain.error.ModelManagerException
 import com.example.core.domain.error.TranscriptionException
 import com.example.core.domain.error.VadException
+import com.example.core.domain.logging.AppLogger
 import com.example.core.domain.repository.ModelRepository
 import com.example.core.domain.repository.TranscriptionRepository
 import com.example.core.model.DiarizationMode
@@ -59,14 +60,15 @@ class DefaultRunTranscriptionUseCase(
     private val diarization: DiarizationEngine,
     private val language: LanguageDetector,
     private val speech: SpeechEngine,
+    private val logger: AppLogger,
 ) : RunTranscriptionUseCase {
 
     override fun invoke(jobId: String): Flow<JobProgress> = channelFlow {
         try {
-            println("[RunTranscription] start job=$jobId")
+            logger.info(TAG, "start job=$jobId")
             val job = jobs.getJob(jobId) ?: throw DecodingException("Job not found: $jobId")
 
-            // Validate the incoming job is in a startable, non-terminal state (В§22).
+            // Validate the incoming job is in a startable, non-terminal state (§22).
             if (job.status.isTerminal) {
                 throw IllegalStateException("Job $jobId is already in terminal state ${job.status}")
             }
@@ -76,12 +78,12 @@ class DefaultRunTranscriptionUseCase(
             val model = resolveModel(job)
             val config = job.config
 
-            // --- DECODING: stream PCM chunks (В§3, step 1-2). ---
+            // --- DECODING: stream PCM chunks (§3, step 1-2). ---
             updateState(jobId, JobState.DECODING)
             send(JobProgress(jobId, JobState.DECODING, 0.1f))
-            println("[RunTranscription] DECODING useVad=${config.useVad} diar=${config.diarizationMode} model=${model.id}")
+            logger.info(TAG, "DECODING useVad=${config.useVad} diar=${config.diarizationMode} model=${model.id}")
             val pcm = jobs.streamPcm(jobId).toList()
-            println("[RunTranscription] decoded chunks=${pcm.size} totalSamples=${pcm.sumOf { it.size }}")
+            logger.debug(TAG, "decoded chunks=${pcm.size} totalSamples=${pcm.sumOf { it.size }}")
             if (pcm.isEmpty()) throw DecodingException("No audio decoded for job $jobId")
             val fullPcm = concat(pcm)
             if (fullPcm.isEmpty()) throw DecodingException("Decoded audio is empty for job $jobId")
@@ -97,7 +99,7 @@ class DefaultRunTranscriptionUseCase(
                             // A VAD that finds nothing (missing/broken model, no
                             // speech detected) must not silently yield an empty
                             // transcript — fall back to fixed 30 s chunks.
-                            println("[RunTranscription] VAD found no speech, falling back to fixed chunks")
+                            logger.warn(TAG, "VAD found no speech, falling back to fixed chunks")
                             fixedDurationSegments(fullPcm.size, WHISPER_CHUNK_SAMPLES)
                         } else {
                             // VAD emits short speech snippets (silero: 0.25 s+).
@@ -107,17 +109,17 @@ class DefaultRunTranscriptionUseCase(
                             // chunks of up to ~29 s — speech boundaries are
                             // preserved, silence is skipped, quality kept.
                             val merged = mergeSegments(segments, WHISPER_CHUNK_SAMPLES_US)
-                            println("[RunTranscription] VAD segments=${segments.size} merged=$merged")
+                            logger.debug(TAG, "VAD segments=${segments.size} merged=$merged")
                             merged
                         }
                     } catch (e: VadException) {
-                        println("[RunTranscription] VAD failed (${e.message}), falling back to fixed chunks")
+                        logger.warn(TAG, "VAD failed (${e.message}), falling back to fixed chunks")
                         fixedDurationSegments(fullPcm.size, WHISPER_CHUNK_SAMPLES)
                     }
                 } else {
                     fixedDurationSegments(fullPcm.size, WHISPER_CHUNK_SAMPLES)
                 }
-            println("[RunTranscription] PREPROCESSING segments=${speechSegments.size}")
+            logger.debug(TAG, "PREPROCESSING segments=${speechSegments.size}")
 
             // --- DIARIZING (В§3, step 4). The state machine forbids skipping this
             // step (§22), so it is always visited; actual diarization runs only
@@ -126,15 +128,15 @@ class DefaultRunTranscriptionUseCase(
             send(JobProgress(jobId, JobState.DIARIZING, 0.3f))
             val speakerSegments =
                 if (config.diarizationMode == DiarizationMode.DISABLED) {
-                    println("[RunTranscription] DIARIZING disabled")
+                    logger.debug(TAG, "DIARIZING disabled")
                     emptyList()
                 } else {
-                    println("[RunTranscription] DIARIZING start numSpeakers=${config.numSpeakers}")
+                    logger.info(TAG, "DIARIZING start numSpeakers=${config.numSpeakers}")
                     val segments = diarization.diarize(
                         pcm = fullPcm,
                         numSpeakers = config.numSpeakers,
                     )
-                    println("[RunTranscription] DIARIZING done count=${segments.size}")
+                    logger.debug(TAG, "DIARIZING done count=${segments.size}")
                     segments
                 }
 
@@ -146,7 +148,7 @@ class DefaultRunTranscriptionUseCase(
                 LanguageMode.MANUAL -> config.language
                 LanguageMode.AUTO -> {
                     val detected = language.detectLanguage(fullPcm, model).languageCode
-                    println("[RunTranscription] AUTO detected language=\"$detected\"")
+                    logger.debug(TAG, "AUTO detected language=\"$detected\"")
                     detected.takeIf { it.length == 2 && it[0].isLowerCase() && it[1].isLowerCase() }
                 }
             }
@@ -160,15 +162,15 @@ class DefaultRunTranscriptionUseCase(
 
             speechSegments.forEachIndexed { index, seg ->
                 val segmentPcm = slice(fullPcm, seg.startUs, seg.endUs)
-                println("[RunTranscription] TRANSCRIBING ${index + 1}/${speechSegments.size} seg=${seg.startUs}-${seg.endUs} samples=${segmentPcm.size}")
+                logger.info(TAG, "TRANSCRIBING ${index + 1}/${speechSegments.size} seg=${seg.startUs}-${seg.endUs} samples=${segmentPcm.size}")
                 if (segmentPcm.isEmpty()) {
                     // Degenerate slice (e.g. VAD edge at EOF); feeding it to
                     // sherpa crashes natively (SIGSEGV), so skip it.
-                    println("[RunTranscription]   empty slice, skipping")
+                    logger.warn(TAG, "empty slice, skipping")
                     return@forEachIndexed
                 }
                 val result = speech.transcribe(segmentPcm, model, languageCode)
-                println("[RunTranscription]   done text=\"${result.text.take(60)}\"")
+                logger.debug(TAG, "done text=\"${result.text.take(60)}\"")
 
                 // sherpa whisper returns token-level words whose timestamps are
                 // all zero (start==end==0), so per-word turn mapping is only
@@ -253,18 +255,18 @@ class DefaultRunTranscriptionUseCase(
             jobs.saveTranscript(jobId, segments, words)
             updateState(jobId, JobState.COMPLETED)
             send(JobProgress(jobId, JobState.COMPLETED, 1f))
-            println("[RunTranscription] COMPLETED segments=${segments.size} words=${words.size}")
+            logger.info(TAG, "COMPLETED segments=${segments.size} words=${words.size}")
         } catch (e: CancellationException) {
-            println("[RunTranscription] CANCELLED job=$jobId")
+            logger.info(TAG, "CANCELLED job=$jobId")
             persistTerminal(jobId, JobState.CANCELLED)
             throw e
         } catch (e: TranscriptionException) {
-            println("[RunTranscription] FAILED: ${e.message}")
-            persistTerminal(jobId, JobState.FAILED)
+            logger.error(TAG, "FAILED: ${e.message}", e)
+            persistTerminal(jobId, JobState.FAILED, e.message)
             send(JobProgress(jobId, JobState.FAILED, 0f))
         } catch (e: Exception) {
-            println("[RunTranscription] ERROR: ${e}")
-            persistTerminal(jobId, JobState.FAILED)
+            logger.error(TAG, "ERROR: $e", e)
+            persistTerminal(jobId, JobState.FAILED, e.message ?: e.toString())
             send(JobProgress(jobId, JobState.FAILED, 0f))
         }
     }
@@ -310,11 +312,18 @@ private suspend fun updateState(jobId: String, state: JobState) {
         jobs.saveJob(current.copy(status = state, updatedAtUs = nowUs()))
     }
 
-    private suspend fun persistTerminal(jobId: String, state: JobState) {
+    private suspend fun persistTerminal(jobId: String, state: JobState, errorMessage: String? = null) {
         val current = jobs.getJob(jobId) ?: return
         // Never overwrite an already-terminal state (§22).
         if (current.status.isTerminal) return
-        jobs.saveJob(current.copy(status = state, updatedAtUs = nowUs()))
+        jobs.saveJob(
+            current.copy(
+                status = state,
+                updatedAtUs = nowUs(),
+                // Only FAILED carries a reason; completed/cancelled reset it.
+                errorMessage = if (state == JobState.FAILED) errorMessage else null,
+            ),
+        )
     }
 
     private fun nowUs(): Long = System.currentTimeMillis() * 1_000L
@@ -377,6 +386,7 @@ private fun slice(pcm: FloatArray, startUs: Long, endUs: Long): FloatArray {
     }
 
 private companion object {
+        const val TAG = "RunTranscription"
         const val SAMPLE_RATE_HZ = 16_000
         /** 29 s of 16 kHz PCM — just inside Whisper's 30 s context window;
          *  sherpa-onnx rejects waves of exactly 30 s ("less than 30 seconds

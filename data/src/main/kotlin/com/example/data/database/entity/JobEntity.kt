@@ -23,6 +23,8 @@ data class JobEntity(
     val createdAtUs: Long,
     @ColumnInfo(name = "updated_at_us")
     val updatedAtUs: Long,
+    @ColumnInfo(name = "error_message")
+    val errorMessage: String? = null,
     @Embedded
     val config: ConfigEntity,
 )

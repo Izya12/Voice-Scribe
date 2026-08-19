@@ -12,4 +12,9 @@ data class TranscriptionJob(
     val createdAtUs: Long,
     val updatedAtUs: Long,
     val config: TranscriptionConfig = TranscriptionConfig(),
+    /**
+     * Human-readable failure reason, populated when [status] is FAILED.
+     * Null for every other state.
+     */
+    val errorMessage: String? = null,
 )

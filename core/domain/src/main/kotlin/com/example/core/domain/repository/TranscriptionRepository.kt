@@ -27,6 +27,12 @@ interface TranscriptionRepository {
 
     suspend fun saveJob(job: TranscriptionJob)
 
+    /**
+     * Permanently removes a job and its full transcript (segments, words,
+     * speakers, statistics, FTS index). Only terminal jobs should be deleted.
+     */
+    suspend fun deleteJob(jobId: String)
+
     /** Persists the final canonical transcript (segments + words) atomically. */
     suspend fun saveTranscript(
         jobId: String,

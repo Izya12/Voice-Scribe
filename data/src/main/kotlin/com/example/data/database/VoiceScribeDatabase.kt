@@ -14,7 +14,7 @@ import com.example.data.database.entity.StatisticsEntity
 import com.example.data.database.entity.WordEntity
 
 /**
- * Room database (§10). Schema version 1; migrations are managed with
+ * Room database (§10). Schema version 2; migrations are managed with
  * `migration-architect` discipline when models change.
  */
 @Database(
@@ -27,12 +27,24 @@ import com.example.data.database.entity.WordEntity
         SegmentFtsEntity::class,
         ModelEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(JobStateConverter::class)
 abstract class VoiceScribeDatabase : RoomDatabase() {
     abstract fun dao(): VoiceScribeDao
+
+    companion object {
+        /**
+         * v1 -> v2: `transcription_job.error_message` for the failure reason
+         * shown in the UI (§Settings). Pure additive column — no data loss.
+         */
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transcription_job ADD COLUMN error_message TEXT")
+            }
+        }
+    }
 }
 
 /**

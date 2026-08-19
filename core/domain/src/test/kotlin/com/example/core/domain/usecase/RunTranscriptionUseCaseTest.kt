@@ -11,6 +11,8 @@ import com.example.core.domain.engine.SpeakerSegment
 import com.example.core.domain.engine.VadEngine
 import com.example.core.domain.error.DecodingException
 import com.example.core.domain.error.VadException
+import com.example.core.domain.logging.AppLogger
+import com.example.core.model.LogLevel
 import com.example.core.domain.repository.ModelRepository
 import com.example.core.domain.repository.Transcript
 import com.example.core.domain.repository.TranscriptionRepository
@@ -34,6 +36,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RunTranscriptionUseCaseTest {
+
+    private val fakeLogger = object : AppLogger {
+        override fun isEnabled(level: LogLevel) = true
+        override fun debug(tag: String, message: String, throwable: Throwable?) {}
+        override fun info(tag: String, message: String, throwable: Throwable?) {}
+        override fun warn(tag: String, message: String, throwable: Throwable?) {}
+        override fun error(tag: String, message: String, throwable: Throwable?) {}
+    }
 
     private val model = ModelDescriptor(
         id = "whisper-tiny",
@@ -93,6 +103,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         val progress = useCase.invoke("j1").toList()
@@ -125,6 +136,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         useCase.invoke("j1").toList()
@@ -154,6 +166,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = lang,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         useCase.invoke("j1").toList()
@@ -188,6 +201,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = blankLang,
             speech = speech,
+            logger = fakeLogger,
         )
 
         useCase.invoke("j1").toList()
@@ -212,6 +226,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         val progress = useCase.invoke("j1").toList()
@@ -233,6 +248,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         val progress = useCase.invoke("j1").toList()
@@ -273,6 +289,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = speech,
+            logger = fakeLogger,
         )
 
         useCase.invoke("j1").toList()
@@ -309,6 +326,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = speech,
+            logger = fakeLogger,
         )
 
         useCase.invoke("j1").toList()
@@ -361,6 +379,7 @@ class RunTranscriptionUseCaseTest {
             diarization = gappyDiarization,
             language = fakeLanguage,
             speech = speech,
+            logger = fakeLogger,
         )
 
         useCase.invoke("j1").toList()
@@ -399,6 +418,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = speech,
+            logger = fakeLogger,
         )
 
         useCase.invoke("j1").toList()
@@ -432,6 +452,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         useCase.invoke("j1").toList()
@@ -462,6 +483,7 @@ class RunTranscriptionUseCaseTest {
             diarization = diarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         val progress = useCase.invoke("j1").toList()
@@ -510,6 +532,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = speech,
+            logger = fakeLogger,
         )
 
         val progress = useCase.invoke("j1").toList()
@@ -528,6 +551,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         val progress = useCase.invoke("nope").toList()
@@ -545,6 +569,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         val progress = useCase.invoke("j1").toList()
@@ -564,6 +589,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         val progress = useCase.invoke("j1").toList()
@@ -582,6 +608,7 @@ class RunTranscriptionUseCaseTest {
             diarization = fakeDiarization,
             language = fakeLanguage,
             speech = fakeSpeech,
+            logger = fakeLogger,
         )
 
         val progress = useCase.invoke("j1").toList()
@@ -639,6 +666,7 @@ class RunTranscriptionUseCaseTest {
             flowOf(savedTranscript ?: Transcript(jobId, emptyList(), emptyList()))
         override suspend fun renameSpeaker(jobId: String, speakerId: Long, displayName: String) {}
         override suspend fun searchInJob(jobId: String, query: String, limit: Int): List<TranscriptionSegment> = emptyList()
+        override suspend fun deleteJob(jobId: String) {}
         override suspend fun reconcileStaleJobs() {}
     }
 }
