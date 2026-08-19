@@ -13,7 +13,7 @@ Three canonical docs at the repo root:
 
 - `PROJECT_MANIFEST.md` is the source of truth for project state and version pins. When state or versions change, update it (including "Last Updated") — but do NOT blindly trust its pins; verify against `gradle/libs.versions.toml` first.
 - `§N` references (e.g. `§11`, `§51`, `§94`) point to an external engineering contract (`promt.md`) that is **not in this repo** — they cannot be resolved locally.
-- Gotchas: the manifest says docs live under `docs/`, but they are actually at the repo root. `AUDIT.md`, referenced in ARCHITECTURE §17, is also absent.
+- Gotchas: the manifest says docs live under `docs/` — since 2026-08-19 user/developer docs do live in `docs/` (README.md, user-guide.md, developer-guide.md, troubleshooting.md), but the canonical docs are still at the repo root. `AUDIT.md`, referenced in ARCHITECTURE §17, is also absent.
 
 ## Module layout & dependency rule (ARCHITECTURE §1 / MANIFEST §7)
 
