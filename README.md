@@ -1,6 +1,6 @@
 # VoiceScribe
 
-**Офлайн-транскрибатор речи для Android.** Распознавание речи (Whisper ASR) выполняется полностью на устройстве через `sherpa-onnx` — без интернета, без облака, без телеметрии. Аудиофайлы декодируются локально (Media3/MediaCodec), модель Whisper запускается на CPU (ARM NEON).
+**Офлайн-транскрибатор речи для Android.** Распознавание речи (Whisper / GigaAM ASR) выполняется полностью на устройстве через `sherpa-onnx` — без интернета, без облака, без телеметрии. Аудиофайлы декодируются локально (Media3/MediaCodec), модели запускаются на CPU (ARM NEON).
 
 ## Возможности
 
@@ -8,9 +8,12 @@
 - **Транскрипция аудиофайлов** (MP3, AAC, M4A, OGG, WAV и другие форматы, поддерживаемые платформенными кодекaми) в фоновом сервисе с прогрессом в уведомлении.
 - **VAD-фильтрация** (Silero VAD v5): тишина вырезается, речь режется на сегменты ~20 с; без VAD — фиксированные чанки по 30 с.
 - **Диаризация спикеров** (pyannote-segmentation-3-0 + 3D-Speaker ERes2Net): определение говорящих, переименование спикеров.
+- **ASR-движки**: Whisper (tiny/base/medium) **и GigaAM** — GigaAM v3 (русский) и GigaAM Multilingual (RU/KK/KY/UZ), NeMo CTC через sherpa-onnx.
 - **Выбор языка** (ru, en, de, fr, es, it, pt, uk, pl, zh, ja, ko, tr) или автоопределение.
 - **Просмотр транскрипта**: сегменты со спикерами, поиск по тексту (FTS), экспорт в TXT/SRT/VTT/JSON через SAF.
 - **Управление моделями**: скачивание, активация, удаление (активная модель защищена от удаления).
+- **Настройки**: файловое логирование с выбором уровня (DEBUG/INFO/WARN/ERROR), журнал `filesDir/logs/voicescribe.log`.
+- **Управление заданиями**: отмена, удаление завершённых/ошибок/отменённых, текст ошибки в карточке задания.
 - **Приватность**: никакой телеметрии, данные не покидают устройство.
 
 ## Архитектура
@@ -23,10 +26,10 @@ Gradle multi-module, зависимости направлены внутрь:
 
 | Модуль | Содержимое |
 |---|---|
-| `:core:model` | Доменные модели: `JobState` (машина состояний), `TranscriptionJob`, `TranscriptionSegment`, `Word`, `Speaker`, `ModelDescriptor` |
-| `:core:domain` | Интерфейсы движков и репозиториев, use cases (`RunTranscriptionUseCase`, `GetModels`, `ManageModel`), ошибки |
-| `:engine` | Адаптеры sherpa-onnx: `SherpaWhisperEngine`, `SherpaVadEngine`, `SherpaDiarizationEngine`, `SherpaLanguageDetector` |
-| `:data` | Room DB (jobs/segments/words/speakers/statistics/FTS4/models), `AudioDecoder` + `AudioResampler` (→ 16 кГц mono float), `ModelRepositoryImpl` (SHA-256 атомарная установка, распаковка tar.bz2), `TranscriptExporterImpl` |
+| `:core:model` | Доменные модели: `JobState` (машина состояний), `TranscriptionJob`, `TranscriptionSegment`, `Word`, `Speaker`, `ModelDescriptor`, `LogLevel` |
+| `:core:domain` | Интерфейсы движков и репозиториев, use cases (`RunTranscriptionUseCase`, `GetModels`, `ManageModel`), `AppLogger`, `SettingsRepository`, ошибки |
+| `:engine` | Адаптеры sherpa-onnx: `SherpaWhisperEngine` (Whisper + GigaAM NeMo CTC), `SherpaVadEngine`, `SherpaDiarizationEngine`, `SherpaLanguageDetector` |
+| `:data` | Room DB v2 (jobs/segments/words/speakers/statistics/FTS4/models), `AudioDecoder` + `AudioResampler` (→ 16 кГц mono float), `ModelRepositoryImpl` (SHA-256 атомарная установка, распаковка tar.bz2, sidecar-файлы), `TranscriptExporterImpl`, `FileAppLogger`, `SettingsRepositoryImpl` |
 | `:app` | Compose UI (RU), MVVM + Hilt, `MediaProcessingService` (foreground service типа `mediaProcessing`), Navigation Compose |
 
 Ключевые решения и обоснования: [ARCHITECTURE.md](ARCHITECTURE.md) (заморожен, Phase 2), [RESEARCH.md](RESEARCH.md) (исследования, Phase 1), [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) (состояние проекта и версии).
@@ -61,6 +64,7 @@ adb shell am start -n com.example.voicescribe/.ui.MainActivity
 
 - Милстоуны 0–7 выполнены: тулчейн, scaffold, `:core:model`/`:core:domain`/`:engine`/`:data`/`:app`, полная сборка + установка на устройство (Samsung SM-S928B).
 - Phase C (UI): два таба, просмотр транскрипта, поиск, экспорт, спикеры, язык, управление моделями — реализованы.
-- 25 unit-тестов GREEN; end-to-end прогон на устройстве (скачивание моделей → транскрипция → отмена) — в процессе проверки.
+- 2026-08-19: вкладка «Настройки» (файловое логирование), удаление заданий, текст ошибок в карточках; добавлены ASR-модели GigaAM v3 (RU) и GigaAM Multilingual (RU/KK/KY/UZ).
+- **42 unit-теста GREEN** (модель 10, domain 17, data 15); на устройстве проверены: установка APK, запуск, вкладки UI, карточки моделей (включая GigaAM). Полный end-to-end прогон (скачивание моделей → транскрипция → отмена) — в процессе проверки.
 
 См. [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) для полного состояния и известных ограничений.

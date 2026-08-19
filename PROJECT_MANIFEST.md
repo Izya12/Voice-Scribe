@@ -111,8 +111,8 @@ All five Gradle modules are initialized and compiling (Milestones 1вЂ“7 done
 * `:core:model` вЂ” JobState machine, TranscriptionJob/Config, TranscriptionSegment, Word, Speaker, ModelDescriptor, TranscriptionStatistics
 * `:core:domain` вЂ” engine interfaces (SpeechEngine/VadEngine/DiarizationEngine/LanguageDetector), repositories (TranscriptionRepository incl. `observeTranscript`/`renameSpeaker`/`searchInJob`, ModelRepository incl. `observeActiveModelId`, TranscriptExporter), use cases (RunTranscriptionUseCase, GetModels/ManageModel), errors
 * `:engine` вЂ” sherpa-onnx adapters: SherpaWhisperEngine, SherpaVadEngine, SherpaDiarizationEngine, SherpaLanguageDetector (null AssetManager вЂ” models live in `filesDir/models`)
-* `:data` вЂ” Room DB v1 (jobs/segments/words/speakers/statistics/FTS4/models), VoiceScribeDao, AudioDecoder (MediaExtractor audio-only в†’ 16 kHz mono), AudioResampler, ModelRepositoryImpl (SHA-256 atomic install, tar.bz2 extraction, active-model deletion protection), TranscriptExporterImpl (TXT/SRT/VTT/JSON)
-* `:app` вЂ” Hilt wiring, Compose UI (RU), MainViewModel/ModelsViewModel/TranscriptDetailViewModel, MediaProcessingService FGS (`mediaProcessing`), Navigation Compose (transcribe / transcript/{jobId}), TranscriptionProgressStore
+* `:data` вЂ” Room DB v2 (jobs/segments/words/speakers/statistics/FTS4/models; MIGRATION_1_2 adds `error_message`), VoiceScribeDao, AudioDecoder (MediaExtractor audio-only в†’ 16 kHz mono), AudioResampler, ModelRepositoryImpl (SHA-256 atomic install, tar.bz2 extraction, sidecar files, active-model deletion protection), TranscriptExporterImpl (TXT/SRT/VTT/JSON), FileAppLogger, SettingsRepositoryImpl
+* `:app` вЂ” Hilt wiring, Compose UI (RU), MainViewModel/ModelsViewModel/SettingsViewModel/TranscriptDetailViewModel, MediaProcessingService FGS (`mediaProcessing`), Navigation Compose (transcribe / transcript/{jobId}), TranscriptionProgressStore
 
 ### Created Documentation Structure:
 * `docs/` declared in manifest but docs live at repo ROOT: `RESEARCH.md`, `ARCHITECTURE.md` (FROZEN), `PROJECT_MANIFEST.md` (this file) вЂ” `AUDIT.md` (referenced in ARCHITECTURE В§17) is absent
@@ -169,7 +169,7 @@ Blueprint for reference (original Phase 3 output):
 
 ## 8. Test & QA Status
 
-* **Unit Tests Status:** `GREEN` вЂ” 29 tests: `:core:model` 10 (JobState machine 6 + LogLevel 4), `:core:domain` 9 (RunTranscriptionUseCase), `:data` 10 (TranscriptExporterImpl 3 + ResumableDownloader 4 + FileAppLogger 4). Verified 2026-08-19 with Kotlin 2.4.10 / KSP 2.3.11.
+* **Unit Tests Status:** `GREEN` вЂ” 42 tests (re-counted 2026-08-19 from JUnit XML): `:core:model` 10 (JobState machine 6 + LogLevel 4), `:core:domain` 17 (RunTranscriptionUseCase), `:data` 15 (TranscriptExporterImpl 7 + ResumableDownloader 4 + FileAppLogger 4). Verified with Kotlin 2.4.10 / KSP 2.3.11.
 * **Integration Tests Status:** `PENDING` (device-dependent)  
 * **JNI/Native Tests Status:** `PARTIAL` вЂ” null-AssetManager fix verified on device (COMPLETED in logs, no native abort); full end-to-end re-verification pending  
 * **QA Status:** `PENDING`  
@@ -195,6 +195,7 @@ Added two NeMo CTC (GigaAM) ASR models; the ASR engine now branches whisper vs n
 - **ModelDescriptor.extraFiles:** new sidecar-file support (`ModelExtraFile`, default empty) — sidecars are downloaded + SHA-verified into `models/` alongside plain models; install/delete/installed-checks updated in `ModelRepositoryImpl`.
 - **Engine:** `SherpaWhisperEngine` branches on `gigaam-*` ids → `OfflineNemoEncDecCtcModelConfig` (`modelType="nemo_ctc"`, `greedy_search`, tokens); whisper path unchanged. NeMo recognizer cache key is language-independent (language is baked into the model).
 - **ASR selection:** `RunTranscriptionUseCase.resolveModel` / `isAsrModel` now accept both `whisper-*` and `gigaam-*` ids.
+- **Verified on device 2026-08-19:** Models tab shows both GigaAM cards («GigaAM v3 Russian (CTC int8)» 155 МБ MID, «GigaAM Multilingual RU/KK/KY/UZ (CTC int8)» 214 МБ HIGH, status «Скачать»); confirmed via `uiautomator dump --compressed` (MCP ui_dump times out on Models tab).
 - **Pending on device:** download + transcribe a Russian clip with GigaAM v3 (VAD on/off), then a multilingual clip to verify.
 
 ## 11. Build Status (2026-08-19 - Settings/logging + job deletion session)
